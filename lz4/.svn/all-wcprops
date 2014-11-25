@@ -1,0 +1,95 @@
+K 25
+svn:wc:ra_dav:version-url
+V 23
+/svn/!svn/ver/124/trunk
+END
+lz4.c
+K 25
+svn:wc:ra_dav:version-url
+V 29
+/svn/!svn/ver/124/trunk/lz4.c
+END
+README.md
+K 25
+svn:wc:ra_dav:version-url
+V 33
+/svn/!svn/ver/122/trunk/README.md
+END
+lz4.h
+K 25
+svn:wc:ra_dav:version-url
+V 29
+/svn/!svn/ver/124/trunk/lz4.h
+END
+lz4_format_description.txt
+K 25
+svn:wc:ra_dav:version-url
+V 50
+/svn/!svn/ver/111/trunk/lz4_format_description.txt
+END
+lz4frame.c
+K 25
+svn:wc:ra_dav:version-url
+V 34
+/svn/!svn/ver/124/trunk/lz4frame.c
+END
+lz4hc.c
+K 25
+svn:wc:ra_dav:version-url
+V 31
+/svn/!svn/ver/124/trunk/lz4hc.c
+END
+liblz4.pc.in
+K 25
+svn:wc:ra_dav:version-url
+V 36
+/svn/!svn/ver/120/trunk/liblz4.pc.in
+END
+lz4hc.h
+K 25
+svn:wc:ra_dav:version-url
+V 31
+/svn/!svn/ver/124/trunk/lz4hc.h
+END
+lz4frame.h
+K 25
+svn:wc:ra_dav:version-url
+V 34
+/svn/!svn/ver/124/trunk/lz4frame.h
+END
+NEWS
+K 25
+svn:wc:ra_dav:version-url
+V 28
+/svn/!svn/ver/124/trunk/NEWS
+END
+Makefile
+K 25
+svn:wc:ra_dav:version-url
+V 32
+/svn/!svn/ver/124/trunk/Makefile
+END
+LICENSE
+K 25
+svn:wc:ra_dav:version-url
+V 31
+/svn/!svn/ver/117/trunk/LICENSE
+END
+xxhash.c
+K 25
+svn:wc:ra_dav:version-url
+V 32
+/svn/!svn/ver/124/trunk/xxhash.c
+END
+LZ4_Framing_Format.html
+K 25
+svn:wc:ra_dav:version-url
+V 47
+/svn/!svn/ver/122/trunk/LZ4_Framing_Format.html
+END
+xxhash.h
+K 25
+svn:wc:ra_dav:version-url
+V 32
+/svn/!svn/ver/124/trunk/xxhash.h
+END

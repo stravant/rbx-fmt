@@ -1,0 +1,41 @@
+K 25
+svn:wc:ra_dav:version-url
+V 32
+/svn/!svn/ver/124/trunk/examples
+END
+printVersion.c
+K 25
+svn:wc:ra_dav:version-url
+V 47
+/svn/!svn/ver/122/trunk/examples/printVersion.c
+END
+blockStreaming_doubleBuffer.c
+K 25
+svn:wc:ra_dav:version-url
+V 62
+/svn/!svn/ver/123/trunk/examples/blockStreaming_doubleBuffer.c
+END
+Makefile
+K 25
+svn:wc:ra_dav:version-url
+V 41
+/svn/!svn/ver/124/trunk/examples/Makefile
+END
+HCStreaming_ringBuffer.c
+K 25
+svn:wc:ra_dav:version-url
+V 57
+/svn/!svn/ver/124/trunk/examples/HCStreaming_ringBuffer.c
+END
+blockStreaming_ringBuffer.c
+K 25
+svn:wc:ra_dav:version-url
+V 60
+/svn/!svn/ver/124/trunk/examples/blockStreaming_ringBuffer.c
+END
+blockStreaming_lineByLine.c
+K 25
+svn:wc:ra_dav:version-url
+V 60
+/svn/!svn/ver/123/trunk/examples/blockStreaming_lineByLine.c
+END

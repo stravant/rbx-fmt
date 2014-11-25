@@ -1,0 +1,89 @@
+K 25
+svn:wc:ra_dav:version-url
+V 32
+/svn/!svn/ver/124/trunk/programs
+END
+bench.c
+K 25
+svn:wc:ra_dav:version-url
+V 40
+/svn/!svn/ver/121/trunk/programs/bench.c
+END
+lz4cat.1
+K 25
+svn:wc:ra_dav:version-url
+V 41
+/svn/!svn/ver/118/trunk/programs/lz4cat.1
+END
+lz4io.c
+K 25
+svn:wc:ra_dav:version-url
+V 40
+/svn/!svn/ver/124/trunk/programs/lz4io.c
+END
+lz4cli.c
+K 25
+svn:wc:ra_dav:version-url
+V 41
+/svn/!svn/ver/123/trunk/programs/lz4cli.c
+END
+fullbench.c
+K 25
+svn:wc:ra_dav:version-url
+V 44
+/svn/!svn/ver/124/trunk/programs/fullbench.c
+END
+datagen.c
+K 25
+svn:wc:ra_dav:version-url
+V 42
+/svn/!svn/ver/120/trunk/programs/datagen.c
+END
+bench.h
+K 25
+svn:wc:ra_dav:version-url
+V 40
+/svn/!svn/ver/120/trunk/programs/bench.h
+END
+fuzzer.c
+K 25
+svn:wc:ra_dav:version-url
+V 41
+/svn/!svn/ver/124/trunk/programs/fuzzer.c
+END
+lz4io.h
+K 25
+svn:wc:ra_dav:version-url
+V 40
+/svn/!svn/ver/117/trunk/programs/lz4io.h
+END
+lz4.1
+K 25
+svn:wc:ra_dav:version-url
+V 38
+/svn/!svn/ver/118/trunk/programs/lz4.1
+END
+COPYING
+K 25
+svn:wc:ra_dav:version-url
+V 40
+/svn/!svn/ver/111/trunk/programs/COPYING
+END
+frametest.c
+K 25
+svn:wc:ra_dav:version-url
+V 44
+/svn/!svn/ver/124/trunk/programs/frametest.c
+END
+lz4c.1
+K 25
+svn:wc:ra_dav:version-url
+V 39
+/svn/!svn/ver/117/trunk/programs/lz4c.1
+END
+Makefile
+K 25
+svn:wc:ra_dav:version-url
+V 41
+/svn/!svn/ver/124/trunk/programs/Makefile
+END
