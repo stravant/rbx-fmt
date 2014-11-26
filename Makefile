@@ -5,12 +5,20 @@ INCLUDE=-Ilz4
 
 LINK=-Llz4
 
+all: main
+
 fmt_rbx: fmt_rbx.h fmt_rbx.c
 	$(CC) $(LINK) $(INCLUDE) -c fmt_rbx.c
 
-main: main.c fmt_rbx
-	$(CC) $(LINK) $(INCLUDE) -o main main.c fmt_rbx.o -llz4
+rbx_types: rbx_types.h rbx_types.c
+	$(CC) $(INCLUDE) -c rbx_types.c
 
-test: main
+main: main.c fmt_rbx rbx_types
+	$(CC) $(LINK) $(INCLUDE) -o main main.c fmt_rbx.o rbx_types.o -llz4
+
+debug: CC += -g
+debug: main
+
+test: debug
 	rm -rf test_file.dump
 	./main test_file.rbxl > test_file.dump

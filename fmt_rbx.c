@@ -4,7 +4,9 @@
 #include <string.h>
 #include <stdint.h>
 #include <alloca.h>
+#include <assert.h>
 
+#include "rbx_types.h"
 #include "fmt_rbx.h"
 #include "lz4.h"
 
@@ -89,6 +91,14 @@ float read_roblox_float(uint8_t **ptr) {
 	return f;
 }
 
+/* Read a normal float */
+float read_float32(uint8_t **ptr) {
+	uint32_t integer = read_uint32(ptr);
+
+	// Reinterpret cast
+	return *(float*)&integer;
+}
+
 /* De-interleave an array of interleaved 32 bit values */
 void unmix_32_array(uint8_t *ptr, size_t length) {
 	unsigned int count = length / 4;
@@ -105,6 +115,9 @@ void unmix_32_array(uint8_t *ptr, size_t length) {
 	
 	// Copy back to the buffer
 	memcpy(ptr, tmp, length);
+
+	// Free the buffer
+	free(tmp);
 }
 
 /* Read in bytes of padding */
@@ -124,7 +137,6 @@ int read_compressed(uint8_t **ptr, struct lz4_data *output) {
 	// Read in the compression header
 	uint32_t compressed_length = read_uint32(ptr);
 	uint32_t decompressed_length = read_uint32(ptr);
-	printf("Ratio: %f\n", ((float)compressed_length)/((float)decompressed_length));
 	read_padding(ptr, 4);
 
 	// Try to decompress
@@ -150,13 +162,11 @@ int read_compressed(uint8_t **ptr, struct lz4_data *output) {
 int read_file_record(uint8_t **ptr, const char *tag, struct lz4_data *output) {
 	// Read / check the tag
 	if (!read_const(ptr, tag)) {
-		printf("Bad file record tag\n");
 		return 0;
 	}
 
 	// Decompress the stuff
 	if (!read_compressed(ptr, output)) {
-		printf("Error decompressing.\n");
 		return 0;
 	}
 
@@ -164,7 +174,7 @@ int read_file_record(uint8_t **ptr, const char *tag, struct lz4_data *output) {
 }
 
 /* Read a type record */
-int read_type_record(uint8_t **ptr) {
+int read_type_record(uint8_t **ptr, struct rbx_object_class *type_info) {
 	// Get the record
 	struct lz4_data record;
 	if (!read_file_record(ptr, "INST", &record)) {
@@ -178,48 +188,63 @@ int read_type_record(uint8_t **ptr) {
 	uint8_t *name = recordptr;
 	recordptr += name_length;
 
-	printf("(%zu) Type <%u> '%.*s'\n", record.length, type_id, name_length, name);
+	// Write type id
+	type_info->type_id = type_id;
 
-	// Has referent array?
+	// Write out the name
+	type_info->name.data = (uint8_t*)malloc(name_length + 1);
+	memcpy(type_info->name.data, name, name_length);
+	type_info->name.data[name_length] = '\0';
+	type_info->name.length = name_length;
+
+	// Has additional data?
 	uint8_t has_additional_data = read_uint8(&recordptr);
-	printf(" |has_additional_data: %d\n", (int)has_additional_data);
 
 	// Instance count
 	uint32_t instance_count = read_uint32(&recordptr);
-	printf(" |instance_count: %d\n", (int)instance_count);
+
+	// Write out the instance count
 
 	// Unmix the referent array
 	unmix_32_array(recordptr, instance_count*4);
 
+	// Prepare the referent array output
+	type_info->object_count = instance_count;
+	type_info->object_referent_array = 
+		(uint32_t*)malloc(sizeof(uint32_t)*instance_count);
+
 	// Referent array
-	printf(" |referents:\n | ");
 	int32_t referent = 0;
 	for (int i = 0; i < instance_count; ++i) {
 		referent += read_folded_int(&recordptr);
-		printf("%u ", referent);
+		type_info->object_referent_array[i] = referent;
 	}
-	printf("\n");
 
 	// Additional data
 	if (has_additional_data) {
-		printf(" |additional data:\n | ");
 		for (int i = 0; i < instance_count; ++i) {
 			uint8_t extra = read_uint8(&recordptr);
-			printf("%d ", (int)extra);
+			UNUSED(extra);
 		}
-		printf("\n");
 	}
-	printf(" '---\n\n");
+
+	// Prepare additional fields in the output
+	type_info->prop_count = 0;
+	type_info->prop_list = NULL;
 
 	return 1;
 }
 
 /* Read in a values of a given property type */
-int read_values(uint8_t type, uint8_t **ptr, size_t length) {
+struct rbx_value **read_values(uint8_t type, uint8_t **ptr, size_t length, uint32_t value_count) {
 	uint8_t *after = (*ptr) + length;
-	int value_count = 0;
 
-	if (type == 0x1) {
+	// Allocate space to store the translated values in
+	struct rbx_value **values = (struct rbx_value**)malloc(value_count*sizeof(void*));
+	struct rbx_value **output = values;
+	memset(values, 0x0, value_count*sizeof(void*));
+
+	if (type == RBX_TYPE_STRING) {
 		// Read list of strings
 		while (*ptr < after) {
 			// Read a string
@@ -227,58 +252,77 @@ int read_values(uint8_t type, uint8_t **ptr, size_t length) {
 			uint8_t *data = *ptr;
 			*ptr += length;
 
-			++value_count;
+			// Write into a value
+			// (Allocate space for both the value and the string data in the same
+			//  memory chunk.)
+			struct rbx_value *value = 
+				(struct rbx_value*)malloc(sizeof(struct rbx_value) + length + 1);
+			uint8_t *str_storage = (uint8_t*)(value + 1);
 
-			// Print it
-			if (length < 32) {
-				printf(" |   '%.*s'\n", (int)length, data);
-			} else {
-				printf(" |   '%.*s [%d characters]'\n", 32, data, (int)length);
-			}
+			// Copy the string data into the chunk and null terminate it
+			memcpy(str_storage, data, length);
+			str_storage[length] = '\0';
+
+			// Write to the chunk fields
+			value->type = RBX_TYPE_STRING;
+			value->string_value.data = str_storage;
+			value->string_value.length = length;
+
+			// Store back
+			*(output++) = value;
 		}
-	} else if (type == 0x2) {
+	} else if (type == RBX_TYPE_BOOLEAN) {
 		// Array of booleans
 		while (*ptr < after) {
 			// Read the bool
-			uint8_t value = read_uint8(ptr);
+			uint8_t bvalue = read_uint8(ptr);
 
-			++value_count;
-
-			if (value) {
-				printf(" |   true\n");
-			} else {
-				printf(" |   false\n");	
-			}
+			// Create the value
+			struct rbx_value *value = malloc(sizeof(struct rbx_value));
+			value->type = RBX_TYPE_BOOLEAN;
+			value->boolean_value.data = bvalue;
+			*(output++) = value;
 		}
-	} else if (type == 0x3) {
+	} else if (type == RBX_TYPE_INT32) {
 		// Integer values
-		value_count = length / 4;
 		unmix_32_array(*ptr, length);
 		for (int i = 0; i < value_count; ++i) {
-			int32_t value = read_folded_int(ptr);
-			printf(" |   %d\n", value);
+			int32_t ivalue = read_folded_int(ptr);
+			
+			// Create the value
+			struct rbx_value *value = malloc(sizeof(struct rbx_value));
+			value->type = RBX_TYPE_INT32;
+			value->int32_value.data = ivalue;
+			*(output++) = value;
 		}
-	} else if (type == 0x4) {
+	} else if (type == RBX_TYPE_FLOAT) {
 		// Float values
-		value_count = length / 4;
 		unmix_32_array(*ptr, length);
 		for (int i = 0; i < value_count; ++i) {
-			float value = read_roblox_float(ptr);
-			printf(" |   %f\n", value);
+			float fvalue = read_roblox_float(ptr);
+			
+			// Create the value
+			struct rbx_value *value = malloc(sizeof(struct rbx_value));
+			value->type = RBX_TYPE_FLOAT;
+			value->float_value.data = fvalue;
+			*(output++) = value;
 		}
-	} else if (type == 0x5) {
+	} else if (type == RBX_TYPE_REAL) {
 		// Lua_Number values
-		value_count = length / 8;
 		for (int i = 0; i < value_count; ++i) {
 			uint64_t ivalue = read_uint64(ptr);
 			double d = *(double*)&ivalue;
-			printf(" |   %f\n", d);
+			
+			// Create the value
+			struct rbx_value *value = malloc(sizeof(struct rbx_value));
+			value->type = RBX_TYPE_REAL;
+			value->real_value.data = d;
+			*(output++) = value;
 		}
 	} else if (type == 0x6) {
-		// UDim value ???
-	} else if (type == 0x7) {
+		// Vector2int16, format unknown
+	} else if (type == RBX_TYPE_UDIM2) {
 		// UDim2 values
-		value_count = length / 16;
 		size_t block_length = length / 4;
 
 		// Pointers
@@ -286,6 +330,7 @@ int read_values(uint8_t type, uint8_t **ptr, size_t length) {
 		uint8_t *scaleyptr = *ptr + 1*block_length;
 		uint8_t *offsetxptr = *ptr + 2*block_length;
 		uint8_t *offsetyptr = *ptr + 3*block_length;
+		*ptr += length;
 
 		// Unmix the arrays for each of the components
 		unmix_32_array(scalexptr, block_length);
@@ -299,41 +344,212 @@ int read_values(uint8_t type, uint8_t **ptr, size_t length) {
 			float scaley = read_roblox_float(&scaleyptr);
 			int32_t offsetx = read_folded_int(&offsetxptr);
 			int32_t offsety = read_folded_int(&offsetyptr);
-			printf(" |   {(%.2f, %d), (%.2f, %d)}\n",
-				scalex, offsetx, scaley, offsety);
+			
+			// Create the value
+			struct rbx_value *value = malloc(sizeof(struct rbx_value));
+			value->type = RBX_TYPE_UDIM2;
+			value->udim2_value.x.scale = scalex;
+			value->udim2_value.x.offset = offsetx;
+			value->udim2_value.y.scale = scaley;
+			value->udim2_value.y.offset = offsety;
+			*(output++) = value;
 		}
-	} else if (type == 0x8) {
+	} else if (type == RBX_TYPE_RAY) {
 		// Ray value
-	} else if (type == 0x9) {
+		// TODO:
+	} else if (type == RBX_TYPE_FACES) {
 		// Faces
-	} else if (type == 0xA) {
+		// TODO:
+	} else if (type == RBX_TYPE_AXIS) {
 		// Axis
-	} else if (type == 0xB) {
+		// TODO:
+	} else if (type == RBX_TYPE_BRICKCOLOR) {
 		// BrickColor
-	} else if (type == 0xC) {
+		unmix_32_array(*ptr, length);
+		for (int i = 0; i < value_count; ++i) {
+			uint32_t color_code = reverse_endianness(read_uint32(ptr));
+
+			// Create the value
+			struct rbx_value *value = malloc(sizeof(struct rbx_value));
+			value->type = RBX_TYPE_BRICKCOLOR;
+			value->brickcolor_value.data = color_code;
+			*(output++) = value;
+		}
+	} else if (type == RBX_TYPE_COLOR3) {
 		// Color3
-	} else if (type == 0xD) {
+		size_t block_length = length / 3;
+
+		// Pointers to components
+		uint8_t *rptr = *ptr + 0*block_length;
+		uint8_t *gptr = *ptr + 1*block_length;
+		uint8_t *bptr = *ptr + 2*block_length;
+		*ptr += length;
+
+		// Unmix
+		unmix_32_array(rptr, block_length);
+		unmix_32_array(gptr, block_length);
+		unmix_32_array(bptr, block_length);
+
+		// Read
+		for (int i = 0; i < value_count; ++i) {
+			float r = read_roblox_float(&rptr);
+			float g = read_roblox_float(&gptr);
+			float b = read_roblox_float(&bptr);
+
+			// Create the value
+			struct rbx_value *value = malloc(sizeof(struct rbx_value));
+			value->type = RBX_TYPE_COLOR3;
+			value->color3_value.r = r;
+			value->color3_value.g = g;
+			value->color3_value.b = b;
+			*(output++) = value;			
+		}
+
+	} else if (type == RBX_TYPE_VECTOR2) {
 		// Vector2
-	} else if (type == 0xE) {
+		size_t block_length = length / 2;
+
+		// Element pointers
+		uint8_t *x_ptr = *ptr + 0*block_length;
+		uint8_t *y_ptr = *ptr + 1*block_length;
+
+		// Unmix
+		unmix_32_array(x_ptr, block_length);
+		unmix_32_array(y_ptr, block_length);
+
+		// Read
+		for (int i = 0; i < value_count; ++i) {
+			float x = read_roblox_float(&x_ptr);
+			float y = read_roblox_float(&y_ptr);
+
+			// Create value
+			struct rbx_value *value = malloc(sizeof(struct rbx_value));
+			value->type = RBX_TYPE_VECTOR2;
+			value->vector2_value.x = x;
+			value->vector2_value.y = y;
+			*(output++) = value;	
+		}
+
+	} else if (type == RBX_TYPE_VECTOR3) {
 		// Vector3
+		size_t block_length = length / 3;
+
+		// Element pointers
+		uint8_t *x_ptr = *ptr + 0*block_length;
+		uint8_t *y_ptr = *ptr + 1*block_length;
+		uint8_t *z_ptr = *ptr + 2*block_length;
+
+		// Unmix
+		unmix_32_array(x_ptr, block_length);
+		unmix_32_array(y_ptr, block_length);
+		unmix_32_array(z_ptr, block_length);
+
+		// Read
+		for (int i = 0; i < value_count; ++i) {
+			float x = read_roblox_float(&x_ptr);
+			float y = read_roblox_float(&y_ptr);
+			float z = read_roblox_float(&z_ptr);
+
+			// Create value
+			struct rbx_value *value = malloc(sizeof(struct rbx_value));
+			value->type = RBX_TYPE_VECTOR3;
+			value->vector3_value.x = x;
+			value->vector3_value.y = y;
+			value->vector3_value.z = z;
+			*(output++) = value;	
+		}
+
 	} else if (type == 0xF) {
 		// ???
-	} else if (type == 0x10) {
+	} else if (type == RBX_TYPE_CFRAME) {
 		// Cframe
+
+		// Unmix position data
+		uint8_t *pos_ptr = *ptr + length - value_count*12;
+		uint8_t *x_ptr = pos_ptr + 0*value_count;
+		uint8_t *y_ptr = pos_ptr + 4*value_count;
+		uint8_t *z_ptr = pos_ptr + 8*value_count;
+		unmix_32_array(x_ptr, value_count*4);
+		unmix_32_array(y_ptr, value_count*4);
+		unmix_32_array(z_ptr, value_count*4);
+
+		// Loop over main data
+		for (int i = 0; i < value_count; ++i) {
+			uint8_t tag = read_uint8(ptr);
+
+			// Create value
+			struct rbx_value *value = malloc(sizeof(struct rbx_value));
+			value->type = RBX_TYPE_CFRAME;
+			*(output++) = value;				
+
+			// Rotation part
+			if (tag == 0x0) {
+				// Whole rotation matrix
+				for (int j = 0; j < 9; ++j) {
+					value->cframe_value.rotation[j] = read_float32(ptr);
+				}
+			} else if (tag == 0x1) {
+				assert(0); // Unknown tag
+			} else if (tag >= 0x2 && tag <= 0x23) {
+				// Read special combinations
+				// TODO: Implement
+				for (int j = 0; j < 9; ++j) {
+					value->cframe_value.rotation[j] = 0;
+				}
+			} else {
+				assert(0); // Unknown tag
+			}
+
+			// Position part
+			value->cframe_value.position.x = read_roblox_float(&x_ptr);
+			value->cframe_value.position.y = read_roblox_float(&y_ptr);
+			value->cframe_value.position.z = read_roblox_float(&z_ptr);
+		}
 	} else if (type == 0x11) {
 		// ???
-	} else if (type == 0x12) {
+	} else if (type == RBX_TYPE_TOKEN) {
 		// Token
-	} else if (type == 0x13) {
+		unmix_32_array(*ptr, length);
+
+		for (int i = 0; i < value_count; ++i) {
+			uint32_t tvalue = reverse_endianness(read_uint32(ptr));
+
+			// Create the value
+			struct rbx_value *value = malloc(sizeof(struct rbx_value));
+			value->type = RBX_TYPE_TOKEN;
+			value->token_value.data = tvalue;
+			*(output++) = value;		
+		}
+	} else if (type == RBX_TYPE_REFERENT) {
 		// Referent
+		unmix_32_array(*ptr, length);
+
+		int32_t rvalue = 0;
+		for (int i = 0; i < value_count; ++i) {
+			int32_t my_value;
+			int32_t diff = read_folded_int(ptr);
+			if (diff != 0) {
+				rvalue += diff;
+				my_value = rvalue;
+			} else {
+				my_value = 0;
+			}
+
+			// Create the value
+			struct rbx_value *value = malloc(sizeof(struct rbx_value));
+			value->type = RBX_TYPE_REFERENT;
+			value->referent_value.data = my_value;
+			*(output++) = value;	
+		}
 	} else {
-		return 0;
+		// ??
 	}
-	return value_count;
+
+	return values;
 }
 
 /* Read a property record */
-int read_prop_record(uint8_t **ptr) {
+int read_prop_record(uint8_t **ptr, struct rbx_object_class *type_array) {
 	// Get the record
 	struct lz4_data record;
 	if (!read_file_record(ptr, "PROP", &record)) {
@@ -342,33 +558,47 @@ int read_prop_record(uint8_t **ptr) {
 	uint8_t *recordptr = record.data;
 
 	// Object belonging to
-	uint32_t type_containing = read_uint32(&recordptr);
+	uint32_t type_containing_id = read_uint32(&recordptr);
+
+	// Get the parent type record
+	struct rbx_object_class *parent_type = type_array + type_containing_id;
+	assert(parent_type != NULL);
+
+	// Create a property in it
+	struct rbx_object_prop *prop = 
+		(struct rbx_object_prop*)malloc(sizeof(struct rbx_object_prop));
+	prop->parent_type = parent_type;
+	++parent_type->prop_count;
+	prop->next = parent_type->prop_list;
+	parent_type->prop_list = prop;
 
 	// Name
 	uint32_t name_length = read_uint32(&recordptr);
 	uint8_t *name = recordptr;
 	recordptr += name_length;
 
+	// Write out the name
+	prop->name.data = (uint8_t*)malloc(name_length + 1);
+	prop->name.data[name_length] = '\0';
+	memcpy(prop->name.data, name, name_length);
+	prop->name.length = name_length;
+
 	// Property type
 	uint8_t prop_type = read_uint8(&recordptr);
+
+	// Write out the property type
+	prop->value_type = prop_type;
 
 	// Read in values
 	uint8_t *after = record.data + record.length;
 	size_t space_left = after - recordptr;
-
-	printf("Property of <%u> '%.*s'\n", type_containing, name_length, name);
-	printf(" | Type: %x\n", prop_type);
-	printf(" | Values:\n");
-	int value_count = read_values(prop_type, &recordptr, space_left);
-	printf(" | (Value Count = %d)\n", value_count);
-	printf(" '----\n\n");
+	prop->value_array =
+		read_values(prop_type, &recordptr, space_left, parent_type->object_count);
 
 	return 1;
 }
 
 struct rbx_file *read_rbx_file(void *data, size_t length) {
-	printf("Read: %p <%#zx>\n", data, length);
-
 	// Current position in data
 	uint8_t *ptr = (uchar*)data;
 
@@ -384,23 +614,76 @@ struct rbx_file *read_rbx_file(void *data, size_t length) {
 	// Number of types and objects
 	uint32_t typecount = read_uint32(&ptr);
 	uint32_t objectcount = read_uint32(&ptr);
-
-	printf("Type Count: %u\nObject Count: %u\n", typecount, objectcount);
+	UNUSED(objectcount);
 
 	// 8 bytes of 0x0
 	read_padding(&ptr, 8);
 
-	// Type headers
+	// Allocate space for the type info and zero it for debugging
+	struct rbx_object_class *type_array = 
+		malloc(sizeof(struct rbx_object_class) * typecount);
+	memset(type_array, 0x0, sizeof(struct rbx_object_class*) * typecount);
+
+	// Read in type info
 	for (int i = 0; i < typecount; ++i) {
-		read_type_record(&ptr);
+		read_type_record(&ptr, type_array + i);
 	}
 
 	// Property records
 	for (;;) {
-		if (!read_prop_record(&ptr)) {
+		if (!read_prop_record(&ptr, type_array)) {
 			break;
 		}
 	}
 
-	return NULL;
+	// Objects
+	struct rbx_object *object_array = malloc(sizeof(struct rbx_object)*objectcount);
+
+	// Grab object properties, and 
+	for (int i = 0; i < typecount; ++i) {
+		struct rbx_object_class *type_info = (type_array + i);
+		for (uint32_t j = 0; j < type_info->object_count; ++j) {
+			uint32_t referent = type_info->object_referent_array[j];
+
+			// Get and set up the object
+			struct rbx_object *object = (object_array + referent);
+			object->type = type_info;
+			object->referent = referent;
+			object->prop_value_count = type_info->prop_count;
+			object->prop_value_array = 
+				(struct rbx_object_propentry*)
+					malloc(sizeof(struct rbx_object_propentry)*type_info->prop_count);
+
+			// Write in the props
+			struct rbx_object_prop *prop = type_info->prop_list;
+			for (uint32_t k = 0; prop != NULL; prop = prop->next, ++k) {
+				object->prop_value_array[k].prop = prop;
+				object->prop_value_array[k].value = prop->value_array[j];
+				if (prop->value_type == RBX_TYPE_REFERENT && 
+					object->prop_value_array[k].value != NULL) 
+				{
+					prop->value_type = RBX_TYPE_OBJECT;
+					uint32_t other_referent = 
+						object->prop_value_array[k].value->referent_value.data;
+					object->prop_value_array[k].value->type = RBX_TYPE_OBJECT;
+					object->prop_value_array[k].value->object_value.data =
+						&object_array[other_referent];
+				}
+			}
+		}
+	}
+
+	struct rbx_file *output = 
+		(struct rbx_file*)malloc(sizeof(struct rbx_file));
+
+	output->type_count = typecount;
+	output->type_array = type_array;
+	output->object_count = objectcount;
+	output->object_array = object_array;
+
+	return output;
+}
+
+void free_rbx_file(struct rbx_file *file) {
+	// TODO:
 }
