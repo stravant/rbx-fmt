@@ -128,7 +128,9 @@ void read_padding(uint8_t **ptr, size_t count) {
 /* Read in text that should have a constant known value */
 int read_const(uint8_t **ptr, const char *text) {
 	int status = (0 == strncmp((char*)(*ptr), text, strlen(text)));
-	*ptr += strlen(text);
+	if (status) {
+		*ptr += strlen(text);
+	}
 	return status;
 }
 
@@ -598,6 +600,51 @@ int read_prop_record(uint8_t **ptr, struct rbx_object_class *type_array) {
 	return 1;
 }
 
+// Parent records
+struct prnt_record {
+	int32_t object;
+	int32_t parent;
+};
+
+/* Read the PRNT record */
+int read_parent_record(uint8_t **ptr, struct prnt_record *parents) {
+	// Get the record
+	struct lz4_data record;
+	if (!read_file_record(ptr, "PRNT", &record)) {
+		return 0;
+	}
+	uint8_t *recordptr = record.data;
+
+	// Zero byte
+	assert(read_uint8(&recordptr) == 0);
+
+	// Get the object count
+	uint32_t obj_count = read_uint32(&recordptr);
+
+	size_t block_length = 4*obj_count;
+
+	uint8_t *refarray = recordptr + 0*block_length;
+	uint8_t *pararray = recordptr + 1*block_length;
+	unmix_32_array(refarray, block_length);
+	unmix_32_array(pararray, block_length);
+
+	int32_t object_ref = 0;
+	int32_t parent_ref = 0;
+	for (int i = 0; i < obj_count; ++i) {
+		int32_t object_diff = read_folded_int(&refarray);
+		int32_t parent_diff = read_folded_int(&pararray);
+		object_ref += object_diff;
+		parent_ref += parent_diff;
+		parents[i].object = object_ref;
+		parents[i].parent = parent_ref;
+		printf("(%3d,\t%3d)\t(%3d,\t%3d)\n", 
+			object_diff, parent_diff,
+			object_ref, parent_ref);
+	}
+
+	return 1;
+}
+
 struct rbx_file *read_rbx_file(void *data, size_t length) {
 	// Current position in data
 	uint8_t *ptr = (uchar*)data;
@@ -626,7 +673,9 @@ struct rbx_file *read_rbx_file(void *data, size_t length) {
 
 	// Read in type info
 	for (int i = 0; i < typecount; ++i) {
-		read_type_record(&ptr, type_array + i);
+		if (!read_type_record(&ptr, type_array + i)) {
+			return NULL;
+		}
 	}
 
 	// Property records
@@ -636,12 +685,21 @@ struct rbx_file *read_rbx_file(void *data, size_t length) {
 		}
 	}
 
+	// Parent records
+	struct prnt_record *parents = 
+		(struct prnt_record*)malloc(sizeof(struct prnt_record)*objectcount);
+	if (!read_parent_record(&ptr, parents)) {
+		return NULL;
+	}
+
 	// Objects
 	struct rbx_object *object_array = malloc(sizeof(struct rbx_object)*objectcount);
 
-	// Grab object properties, and 
+	// For each type
 	for (int i = 0; i < typecount; ++i) {
 		struct rbx_object_class *type_info = (type_array + i);
+
+		// For each object of this type create the object
 		for (uint32_t j = 0; j < type_info->object_count; ++j) {
 			uint32_t referent = type_info->object_referent_array[j];
 
@@ -650,9 +708,12 @@ struct rbx_file *read_rbx_file(void *data, size_t length) {
 			object->type = type_info;
 			object->referent = referent;
 			object->prop_value_count = type_info->prop_count;
+			// Note, here we make the length of the property value array equal
+			// to the type's prop count + 1, since we are going to add a parent
+			// property later.
 			object->prop_value_array = 
 				(struct rbx_object_propentry*)
-					malloc(sizeof(struct rbx_object_propentry)*type_info->prop_count);
+					malloc(sizeof(struct rbx_object_propentry)*(type_info->prop_count + 1));
 
 			// Write in the props
 			struct rbx_object_prop *prop = type_info->prop_list;
@@ -662,16 +723,98 @@ struct rbx_file *read_rbx_file(void *data, size_t length) {
 				if (prop->value_type == RBX_TYPE_REFERENT && 
 					object->prop_value_array[k].value != NULL) 
 				{
-					prop->value_type = RBX_TYPE_OBJECT;
+					// Change each referent property into an object property
 					uint32_t other_referent = 
 						object->prop_value_array[k].value->referent_value.data;
 					object->prop_value_array[k].value->type = RBX_TYPE_OBJECT;
-					object->prop_value_array[k].value->object_value.data =
-						&object_array[other_referent];
+					if (other_referent == 0) {
+						object->prop_value_array[k].value->object_value.data = NULL;
+					} else {
+						object->prop_value_array[k].value->object_value.data =
+							&object_array[other_referent];
+					}
 				}
 			}
 		}
+
+		// For each TYPE_REFERENT property rewrite -> TYPE_OBJECT
+		struct rbx_object_prop *prop = type_info->prop_list;
+		for (; prop != NULL; prop = prop->next) {
+			if (prop->value_type == RBX_TYPE_REFERENT) {
+				prop->value_type = RBX_TYPE_OBJECT;
+			}
+		}
 	}
+
+	// for (int i = 0; i < objectcount; ++i) {
+	// 	printf("Object <%d>.Parent = <%d>\n", parents[i].object, parents[i].parent);
+	// }
+
+	// For each type, we should add a parent property to it, and decode
+	// the PRNT references.
+	for (int i = 0; i < typecount; ++i) {
+		struct rbx_object_class *type_info = (type_array + i);
+
+		// Create parent property
+		struct rbx_object_prop *parent_prop = malloc(sizeof(struct rbx_object_prop));
+		parent_prop->value_type = RBX_TYPE_OBJECT;
+		parent_prop->parent_type = type_info;
+		parent_prop->value_array = NULL;
+
+		// Name
+		static const char *parent_name = "Parent";
+		parent_prop->name.data = (uint8_t*)malloc(strlen(parent_name) + 1);
+		memcpy(parent_prop->name.data, parent_name, strlen(parent_name));
+		parent_prop->name.data[strlen(parent_name)] = '\0';
+		parent_prop->name.length = strlen(parent_name);
+
+		// Add to list
+		parent_prop->next = type_info->prop_list;
+		type_info->prop_list = parent_prop;
+
+		// For each object, add the parent prop
+		for (uint32_t j = 0; j < type_info->object_count; ++j) {
+			int32_t referent = type_info->object_referent_array[j];
+			struct rbx_object *object = (object_array + referent);
+
+			// Add parent prop to count
+			++object->prop_value_count;
+
+			// Find the parent
+			int32_t parent_referent;
+			for (int k = 0; k < objectcount; ++k) {
+				if (parents[k].object == referent) {
+					parent_referent = parents[k].parent;
+					break;
+				}
+			}
+
+			// Get the parent object
+			struct rbx_object *parent_object;
+			if (parent_referent == 0) {
+				parent_object = NULL;
+			} else {
+				parent_object = (object_array + parent_referent);
+			}
+
+			// Create the value
+			struct rbx_value *value = 
+				(struct rbx_value*)malloc(sizeof(struct rbx_value));
+			value->type = RBX_TYPE_OBJECT;
+			value->object_value.data = parent_object;
+
+			// Set up the last property as the parent property
+			// (Note: We have one extra space allocated after the
+			//        normal prop_value_array for this property)
+			struct rbx_object_propentry *entry = 
+				(object->prop_value_array + type_info->prop_count);
+			entry->prop = parent_prop;
+			entry->value = value;
+		}
+
+		// Increment the prop count on the type
+		++type_info->prop_count;
+	}	 
 
 	struct rbx_file *output = 
 		(struct rbx_file*)malloc(sizeof(struct rbx_file));

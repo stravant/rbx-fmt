@@ -9,6 +9,16 @@
 
 #include "fmt_rbx.h"
 
+const char *get_name(struct rbx_object *object) {
+	for (int i = 0; i < object->prop_value_count; ++i) {
+		struct rbx_object_propentry *prop_entry = (object->prop_value_array + i);
+		if (0 == strcmp("Name", (char*)prop_entry->prop->name.data)) {
+			return (char*)prop_entry->value->string_value.data;
+		}
+	}
+	return NULL;
+}
+
 int main(int argc, char *argv[]) {
 	/* Check args */
 	if (argc != 2) {
@@ -38,29 +48,32 @@ int main(int argc, char *argv[]) {
 	/* Do the thing */
 	struct rbx_file *file = read_rbx_file(data, file_length);
 
+	fflush(stdout);
+
 	// Dump out the resulting data
 	if (file != NULL) {
 		printf("Success, details:\n");
 
-		// Print out a dump of the info
-		for (int i = 0; i < file->type_count; ++i) {
-			struct rbx_object_class *type_info = (file->type_array + i);
+		// // Print out a dump of the info
+		// for (int i = 0; i < file->type_count; ++i) {
+		// 	struct rbx_object_class *type_info = (file->type_array + i);
 
-			printf("Type <%u> '%s':\n", type_info->type_id, type_info->name.data);
-			printf(" | Total of %u instances with %u properties\n",
-				type_info->object_count, type_info->prop_count);
-			struct rbx_object_prop *prop_info;
-			for (prop_info = type_info->prop_list; prop_info; prop_info = prop_info->next) {
-				printf(" | Property '%s'\n", prop_info->name.data);
-			}
-			printf(" '-------\n\n");
-		}
+		// 	printf("Type <%u> '%s':\n", type_info->type_id, type_info->name.data);
+		// 	printf(" | Total of %u instances with %u properties\n",
+		// 		type_info->object_count, type_info->prop_count);
+		// 	struct rbx_object_prop *prop_info;
+		// 	for (prop_info = type_info->prop_list; prop_info; prop_info = prop_info->next) {
+		// 		printf(" | Property '%s'\n", prop_info->name.data);
+		// 	}
+		// 	printf(" '-------\n\n");
+		// }
 		for (int i = 0; i < file->object_count; ++i) {
 			struct rbx_object *object = (file->object_array + i);
 
-			printf("Object <%u> '%s': \n", 
+			printf("Object <%u> %s '%s'\n", 
 				object->referent,
-				object->type->name.data);
+				object->type->name.data,
+				get_name(object));
 			for (int i = 0; i < object->prop_value_count; ++i) {
 				struct rbx_object_propentry *prop_entry = (object->prop_value_array + i);
 				printf(" | %s = ", prop_entry->prop->name.data);
@@ -141,10 +154,13 @@ int main(int argc, char *argv[]) {
 					printf("Referent(%d)", prop_entry->value->referent_value.data);
 					break;
 				case RBX_TYPE_OBJECT:
+					fflush(stdout);
 					if (prop_entry->value->object_value.data == NULL) {
 						printf("nil");
 					} else {
-						printf("Object at %p", prop_entry->value->object_value.data);
+						printf("Object at %p '%s'", 
+							prop_entry->value->object_value.data,
+							get_name(prop_entry->value->object_value.data));
 					}
 					break;
 				}
