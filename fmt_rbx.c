@@ -70,7 +70,7 @@ int32_t read_folded_int(uint8_t **ptr) {
 	// Unfold value
 	int32_t value;
 	if (little & 0x1) {
-		value = -((int32_t)(little >> 1));
+		value = -((int32_t)((little + 1) >> 1));
 	} else {
 		value = little >> 1;
 	}
@@ -134,12 +134,27 @@ int read_const(uint8_t **ptr, const char *text) {
 	return status;
 }
 
+/* Free an rbx_string */
+void free_string(struct rbx_string *string) {
+	// string->data may be null, but that's okay
+	free(string->data);
+	string->data = NULL;
+}
+
+/* Free a compression record chunk */
+void free_compressed(struct lz4_data *chunk) {
+	// chunk->data may be NULL but that's okay
+	free(chunk->data);
+	chunk->data = NULL;
+}
+
 /* Read in compressed data */
 int read_compressed(uint8_t **ptr, struct lz4_data *output) {
 	// Read in the compression header
 	uint32_t compressed_length = read_uint32(ptr);
 	uint32_t decompressed_length = read_uint32(ptr);
-	read_padding(ptr, 4);
+	uint32_t padding = read_uint32(ptr);
+	assert(padding == 0x0);
 
 	// Try to decompress
 	uint8_t *buffer = (uint8_t*)malloc(decompressed_length);
@@ -149,13 +164,18 @@ int read_compressed(uint8_t **ptr, struct lz4_data *output) {
 	// Advance read pointer
 	*ptr += compressed_length;
 
-	// Write out the result
-	output->data = buffer;
-	output->length = decompressed_length;
-
 	if (res < 0) {
+		// Write out a failure and free the temp buffer
+		output->data = NULL;
+		output->length = 0;
+		free(buffer);
+
 		return 0;
 	} else {
+		// Write out the result
+		output->data = buffer;
+		output->length = decompressed_length;
+
 		return 1;
 	}
 }
@@ -205,8 +225,6 @@ int read_type_record(uint8_t **ptr, struct rbx_object_class *type_info) {
 	// Instance count
 	uint32_t instance_count = read_uint32(&recordptr);
 
-	// Write out the instance count
-
 	// Unmix the referent array
 	unmix_32_array(recordptr, instance_count*4);
 
@@ -234,6 +252,9 @@ int read_type_record(uint8_t **ptr, struct rbx_object_class *type_info) {
 	type_info->prop_count = 0;
 	type_info->prop_list = NULL;
 
+	// Free compression record
+	free_compressed(&record);
+
 	return 1;
 }
 
@@ -256,7 +277,8 @@ struct rbx_value **read_values(uint8_t type, uint8_t **ptr, size_t length, uint3
 
 			// Write into a value
 			// (Allocate space for both the value and the string data in the same
-			//  memory chunk.)
+			//  memory chunk, that way the string value can be freed with a
+			//  single free call rather than requiring multiple ones.)
 			struct rbx_value *value = 
 				(struct rbx_value*)malloc(sizeof(struct rbx_value) + length + 1);
 			uint8_t *str_storage = (uint8_t*)(value + 1);
@@ -565,6 +587,10 @@ int read_prop_record(uint8_t **ptr, struct rbx_object_class *type_array) {
 	// Get the parent type record
 	struct rbx_object_class *parent_type = type_array + type_containing_id;
 	assert(parent_type != NULL);
+	if (parent_type == NULL) {
+		free_compressed(&record);
+		return 0;
+	}
 
 	// Create a property in it
 	struct rbx_object_prop *prop = 
@@ -597,6 +623,9 @@ int read_prop_record(uint8_t **ptr, struct rbx_object_class *type_array) {
 	prop->value_array =
 		read_values(prop_type, &recordptr, space_left, parent_type->object_count);
 
+	// Free the compression record
+	free_compressed(&record);
+
 	return 1;
 }
 
@@ -616,33 +645,116 @@ int read_parent_record(uint8_t **ptr, struct prnt_record *parents) {
 	uint8_t *recordptr = record.data;
 
 	// Zero byte
-	assert(read_uint8(&recordptr) == 0);
+	uint8_t parent_data_version = read_uint8(&recordptr);
+	assert(parent_data_version == 0x0);
 
 	// Get the object count
 	uint32_t obj_count = read_uint32(&recordptr);
 
 	size_t block_length = 4*obj_count;
 
+	// Get pointers into data blocks, and unmix the data blocks
 	uint8_t *refarray = recordptr + 0*block_length;
 	uint8_t *pararray = recordptr + 1*block_length;
 	unmix_32_array(refarray, block_length);
 	unmix_32_array(pararray, block_length);
 
+	// Read in the object, parent pairs (Stored differentially)
 	int32_t object_ref = 0;
 	int32_t parent_ref = 0;
 	for (int i = 0; i < obj_count; ++i) {
-		int32_t object_diff = read_folded_int(&refarray);
-		int32_t parent_diff = read_folded_int(&pararray);
-		object_ref += object_diff;
-		parent_ref += parent_diff;
+		object_ref += read_folded_int(&refarray);
+		parent_ref += read_folded_int(&pararray);
 		parents[i].object = object_ref;
 		parents[i].parent = parent_ref;
-		printf("(%3d,\t%3d)\t(%3d,\t%3d)\n", 
-			object_diff, parent_diff,
-			object_ref, parent_ref);
 	}
 
+	// Free the compression record
+	free_compressed(&record);
+	
 	return 1;
+}
+
+/* Free an rbx_object_class */
+void free_type(struct rbx_object_class *type) {
+	// Free name
+	free_string(&type->name);
+
+	// Free each of the properties
+	struct rbx_object_prop *prop = type->prop_list;
+	while (prop != NULL) {
+		// Save a reference to the next
+		struct rbx_object_prop *next = prop->next;
+
+		// Free the name
+		free_string(&prop->name);
+
+		// Don't free the property values here. Free them from the objects
+		// using the values when they are freed, as the objects may have added
+		// more properties that weren't parsed from a file, and aren't in the
+		// value array.
+
+		// But do free the property value array itself, all of it's data is
+		// referenced in objects.
+		free(prop->value_array);
+
+		// Free the prop itself
+		free(prop);
+
+		// Go to the saved next
+		prop = next;
+	}
+	type->prop_list = NULL;
+	type->prop_count = 0;
+
+	// Free the referent array (may be null)
+	free(type->object_referent_array);
+	type->object_referent_array = NULL;
+}
+
+/* Free an array of rbx_object_class-es */
+void free_type_array(struct rbx_object_class *types, uint32_t count) {
+	// Free each type
+	for (uint32_t i = 0; i < count; ++i) {
+		free_type(types + i);
+	}
+
+	// Free the array
+	free(types);
+}
+
+/* Free an rbx_object */
+void free_object(struct rbx_object *obj) {
+	// Free the values that we have
+	for (uint32_t i = 0; i < obj->prop_value_count; ++i) {
+		free(obj->prop_value_array[i].value);
+	}
+
+	// Free the prop_value array
+	free(obj->prop_value_array);
+	obj->prop_value_array = NULL;
+}
+
+/* Free an array of rbx_object-s */
+void free_object_array(struct rbx_object *array, uint32_t count) {
+	// Free each type
+	for (uint32_t i = 0; i < count; ++i) {
+		free_object(array + i);
+	}
+
+	// Free the array
+	free(array);	
+}
+
+/* Free an rbx_file struct */
+void free_rbx_file(struct rbx_file *file) {
+	// Free the arrays and clear out the data structure
+	free_object_array(file->object_array, file->object_count);
+	free_type_array(file->type_array, file->type_count);
+	file->object_array = NULL;
+	file->object_count = 0;
+	file->type_array = NULL;
+	file->type_count = 0;
 }
 
 struct rbx_file *read_rbx_file(void *data, size_t length) {
@@ -661,10 +773,13 @@ struct rbx_file *read_rbx_file(void *data, size_t length) {
 	// Number of types and objects
 	uint32_t typecount = read_uint32(&ptr);
 	uint32_t objectcount = read_uint32(&ptr);
-	UNUSED(objectcount);
 
 	// 8 bytes of 0x0
-	read_padding(&ptr, 8);
+	uint64_t padding = read_uint64(&ptr);
+	assert(padding == 0);
+	if (padding != 0) {
+		return NULL;
+	}
 
 	// Allocate space for the type info and zero it for debugging
 	struct rbx_object_class *type_array = 
@@ -674,6 +789,8 @@ struct rbx_file *read_rbx_file(void *data, size_t length) {
 	// Read in type info
 	for (int i = 0; i < typecount; ++i) {
 		if (!read_type_record(&ptr, type_array + i)) {
+			// Free the types we read in so far
+			free_type_array(type_array, i);
 			return NULL;
 		}
 	}
@@ -691,6 +808,12 @@ struct rbx_file *read_rbx_file(void *data, size_t length) {
 	if (!read_parent_record(&ptr, parents)) {
 		return NULL;
 	}
+
+	// // End block
+	// struct lz4_data record;
+	// if (!read_file_record(&ptr, "END\0", &record)) {
+	// 	return NULL;
+	// }
 
 	// Objects
 	struct rbx_object *object_array = malloc(sizeof(struct rbx_object)*objectcount);
@@ -718,26 +841,36 @@ struct rbx_file *read_rbx_file(void *data, size_t length) {
 			// Write in the props
 			struct rbx_object_prop *prop = type_info->prop_list;
 			for (uint32_t k = 0; prop != NULL; prop = prop->next, ++k) {
-				object->prop_value_array[k].prop = prop;
-				object->prop_value_array[k].value = prop->value_array[j];
-				if (prop->value_type == RBX_TYPE_REFERENT && 
-					object->prop_value_array[k].value != NULL) 
-				{
-					// Change each referent property into an object property
-					uint32_t other_referent = 
-						object->prop_value_array[k].value->referent_value.data;
-					object->prop_value_array[k].value->type = RBX_TYPE_OBJECT;
-					if (other_referent == 0) {
-						object->prop_value_array[k].value->object_value.data = NULL;
+				struct rbx_object_propentry *prop_entry = 
+					&object->prop_value_array[k];	
+
+				// Fill in the property entry on this object
+				prop_entry->prop = prop;
+				prop_entry->value = prop->value_array[j];
+
+				// Referent translation
+				//  Turn referent props into object props with pointers to the
+				//  actual objects.
+				if (prop->value_type == RBX_TYPE_REFERENT) {
+					// Set to an object value type
+					prop_entry->value->type = RBX_TYPE_OBJECT;
+
+					// Translate the thing that it's referring to
+					int32_t other_referent = prop_entry->value->referent_value.data;
+					if (other_referent == -1) {
+						// -1 => No object
+						prop_entry->value->object_value.data = NULL;
 					} else {
-						object->prop_value_array[k].value->object_value.data =
-							&object_array[other_referent];
+						// Otherwise, translate object
+						prop_entry->value->object_value.data = &object_array[other_referent];
 					}
 				}
 			}
 		}
 
-		// For each TYPE_REFERENT property rewrite -> TYPE_OBJECT
+		// We already translated the referent values, but we haven't actually
+		// changed the referent property definitions' types, do that now.
+		//  For each TYPE_REFERENT property rewrite -> TYPE_OBJECT
 		struct rbx_object_prop *prop = type_info->prop_list;
 		for (; prop != NULL; prop = prop->next) {
 			if (prop->value_type == RBX_TYPE_REFERENT) {
@@ -745,10 +878,6 @@ struct rbx_file *read_rbx_file(void *data, size_t length) {
 			}
 		}
 	}
-
-	// for (int i = 0; i < objectcount; ++i) {
-	// 	printf("Object <%d>.Parent = <%d>\n", parents[i].object, parents[i].parent);
-	// }
 
 	// For each type, we should add a parent property to it, and decode
 	// the PRNT references.
@@ -791,7 +920,7 @@ struct rbx_file *read_rbx_file(void *data, size_t length) {
 
 			// Get the parent object
 			struct rbx_object *parent_object;
-			if (parent_referent == 0) {
+			if (parent_referent == -1) {
 				parent_object = NULL;
 			} else {
 				parent_object = (object_array + parent_referent);
@@ -825,8 +954,4 @@ struct rbx_file *read_rbx_file(void *data, size_t length) {
 	output->object_array = object_array;
 
 	return output;
-}
-
-void free_rbx_file(struct rbx_file *file) {
-	// TODO:
 }

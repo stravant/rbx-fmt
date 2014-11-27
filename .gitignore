@@ -3,6 +3,7 @@
 ## Project Specific
 *.dump
 .*
+main
 
 ### Windows ###
 # Windows image file caches

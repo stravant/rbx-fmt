@@ -37,7 +37,6 @@
 /* Special type that we use for translated object referents */
 #define RBX_TYPE_OBJECT     0xFF
 
-
 /* Value types */
 struct rbx_string {
 	uint8_t *data;
@@ -103,7 +102,6 @@ struct rbx_referent {
 struct rbx_object_ref {
 	void *data;
 };
-
 
 /* roblox value tagged union */
 struct rbx_value {

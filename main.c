@@ -19,6 +19,10 @@ const char *get_name(struct rbx_object *object) {
 	return NULL;
 }
 
+const char *get_classname(struct rbx_object *object) {
+	return (char*)object->type->name.data;
+}
+
 int main(int argc, char *argv[]) {
 	/* Check args */
 	if (argc != 2) {
@@ -133,11 +137,11 @@ int main(int argc, char *argv[]) {
 						prop_entry->value->vector3_value.z);
 					break;
 				case RBX_TYPE_CFRAME:
-					printf("CFrame((%f, %f, %f))", //, (%f, %f, %f, %f, %f, %f, %f, %f, %f))",
+					printf("CFrame((%f, %f, %f), (%.2f, %.2f, %.2f, %.2f, %.2f, %.2f, %.2f, %.2f, %.2f))",
 						prop_entry->value->cframe_value.position.x,
 						prop_entry->value->cframe_value.position.y,
-						prop_entry->value->cframe_value.position.z);
-						/*prop_entry->value->cframe_value.rotation[0],
+						prop_entry->value->cframe_value.position.z,
+						prop_entry->value->cframe_value.rotation[0],
 						prop_entry->value->cframe_value.rotation[1],
 						prop_entry->value->cframe_value.rotation[2],
 						prop_entry->value->cframe_value.rotation[3],
@@ -145,7 +149,7 @@ int main(int argc, char *argv[]) {
 						prop_entry->value->cframe_value.rotation[5],
 						prop_entry->value->cframe_value.rotation[6],
 						prop_entry->value->cframe_value.rotation[7],
-						prop_entry->value->cframe_value.rotation[8]);*/
+						prop_entry->value->cframe_value.rotation[8]);
 					break;
 				case RBX_TYPE_TOKEN:
 					printf("EnumValue(%u)", prop_entry->value->token_value.data);
@@ -158,9 +162,11 @@ int main(int argc, char *argv[]) {
 					if (prop_entry->value->object_value.data == NULL) {
 						printf("nil");
 					} else {
-						printf("Object at %p '%s'", 
-							prop_entry->value->object_value.data,
-							get_name(prop_entry->value->object_value.data));
+						struct rbx_object *obj = prop_entry->value->object_value.data;
+						printf("<%s '%s' at %p>",
+							get_classname(obj),
+							get_name(obj),
+							obj);
 					}
 					break;
 				}
