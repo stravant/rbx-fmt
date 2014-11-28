@@ -8,6 +8,7 @@
 #include <string.h>
 
 #include "fmt_rbx.h"
+#include "terrain.h"
 
 const char *get_name(struct rbx_object *object) {
 	for (int i = 0; i < object->prop_value_count; ++i) {
@@ -61,7 +62,7 @@ int main(int argc, char *argv[]) {
 		// // Print out a dump of the info
 		// for (int i = 0; i < file->type_count; ++i) {
 		// 	struct rbx_object_class *type_info = (file->type_array + i);
-
+		//
 		// 	printf("Type <%u> '%s':\n", type_info->type_id, type_info->name.data);
 		// 	printf(" | Total of %u instances with %u properties\n",
 		// 		type_info->object_count, type_info->prop_count);
@@ -71,6 +72,9 @@ int main(int argc, char *argv[]) {
 		// 	}
 		// 	printf(" '-------\n\n");
 		// }
+
+		struct rbx_string *cluster_grid = NULL;
+
 		for (int i = 0; i < file->object_count; ++i) {
 			struct rbx_object *object = (file->object_array + i);
 
@@ -80,6 +84,12 @@ int main(int argc, char *argv[]) {
 				get_name(object));
 			for (int i = 0; i < object->prop_value_count; ++i) {
 				struct rbx_object_propentry *prop_entry = (object->prop_value_array + i);
+
+				// Check for cluster grid data
+				if (!strcmp((char*)prop_entry->prop->name.data, "ClusterGridV3")) {
+					cluster_grid = &prop_entry->value->string_value;
+				}
+
 				printf(" | %s = ", prop_entry->prop->name.data);
 				uint8_t type = prop_entry->prop->value_type;
 				switch (type) {
@@ -167,12 +177,24 @@ int main(int argc, char *argv[]) {
 							get_classname(obj),
 							get_name(obj),
 							obj);
+						(void)obj;
 					}
 					break;
 				}
 				printf("\n");
 			}
 			printf(" '------\n\n");
+		}
+
+		// Is there cluster grid data?
+		if (cluster_grid != NULL) {
+			printf("Cluster grid data: %lu\n", cluster_grid->length);
+			struct rbx_terrain *data = translate_terrain(cluster_grid);
+			if (data) {
+				printf("Translated terrain, result:\n");
+			} else {
+				printf("Failed to translate terrain.\n");
+			}
 		}
 
 		free_rbx_file(file);
