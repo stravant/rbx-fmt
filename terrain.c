@@ -59,10 +59,12 @@ const char *byte_to_binary(uint8_t x) {
 }
 
 uint8_t block_type(uint8_t d0) {
+	// 0x38 mask -> 0011 1000
 	return (d0 & 0x38) >> 3;
 }
 
 uint8_t block_rot(uint8_t d0) {
+	// 0xC0 mask -> 1100 0000
 	return (d0 & 0xC0) >> 6;
 }
 
@@ -132,28 +134,36 @@ void read_chunk(uint8_t **ptr) {
 
 	uint16_t left = 0x4000;
 
-	printf("Pos: %d, %d, %d\n", 
-		chunk.position_x,
-		chunk.position_y,
-		chunk.position_z);
+	//printf("Pos: %d, %d, %d\n", 
+	//	chunk.position_x,
+	//	chunk.position_y,
+	//	chunk.position_z);
 
 	while (left > 0) {
 		read_segment_d0(ptr, &left);
 	}
 
-	for (int i = 0; i < 4; ++i)
-		printf("==================================================\n");
-
 	left = 0x4000;
 	while (left > 0) {
 		read_segment_d1(ptr, &left);
 	}
+
+	printf("\n");
 }
 
 struct rbx_terrain *translate_terrain(struct rbx_string *source) {
 	uint8_t *ptr = source->data;
+	uint8_t *start = ptr;
 
-	read_chunk(&ptr);
+	// While there's data left, read chunks
+	uint32_t chunk_count = 0;
+	while ((ptr - start) < source->length) {
+		read_chunk(&ptr);
+		++chunk_count;
+	}
+
+	printf("Read %u chunks\n", chunk_count);
+	printf("Read: %zx / %zx\n", (ptr - start), source->length);
 
 	return NULL;
 }
