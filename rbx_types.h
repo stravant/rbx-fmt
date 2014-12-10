@@ -14,28 +14,28 @@
  */
 
 /* Types that a Roblox value can have */
-#define RBX_TYPE_STRING     0x1
-#define RBX_TYPE_BOOLEAN    0x2
-#define RBX_TYPE_INT32      0x3
-#define RBX_TYPE_FLOAT      0x4
-#define RBX_TYPE_REAL       0x5
+#define RBX_TYPE_STRING       0x1
+#define RBX_TYPE_BOOLEAN      0x2
+#define RBX_TYPE_INT32        0x3
+#define RBX_TYPE_FLOAT        0x4
+#define RBX_TYPE_REAL         0x5
                          /* 0x6  Vector2int16 unused */
-#define RBX_TYPE_UDIM2      0x7
-#define RBX_TYPE_RAY        0x8
-#define RBX_TYPE_FACES      0x9
-#define RBX_TYPE_AXIS       0xA
-#define RBX_TYPE_BRICKCOLOR 0xB
-#define RBX_TYPE_COLOR3     0xC
-#define RBX_TYPE_VECTOR2    0xD
-#define RBX_TYPE_VECTOR3    0xE
+#define RBX_TYPE_UDIM2        0x7
+#define RBX_TYPE_RAY          0x8
+#define RBX_TYPE_FACES        0x9
+#define RBX_TYPE_AXES         0xA
+#define RBX_TYPE_BRICKCOLOR   0xB
+#define RBX_TYPE_COLOR3       0xC
+#define RBX_TYPE_VECTOR2      0xD
+#define RBX_TYPE_VECTOR3      0xE
                          /* 0xF  Vector3int16 unused */
-#define RBX_TYPE_CFRAME     0x10
+#define RBX_TYPE_CFRAME       0x10
                          /* 0x11 Network CFrame serialization format */
-#define RBX_TYPE_TOKEN      0x12
-#define RBX_TYPE_REFERENT   0x13
-
+#define RBX_TYPE_TOKEN        0x12
+#define RBX_TYPE_REFERENT     0x13
+#define RBX_TYPE_VECTOR3INT16 0x14
 /* Special type that we use for translated object referents */
-#define RBX_TYPE_OBJECT     0xFF
+#define RBX_TYPE_OBJECT       0xFF
 
 /* Value types */
 struct rbx_string {
@@ -69,7 +69,7 @@ struct rbx_faces {
 	uint8_t bottom;
 	uint8_t front;
 };
-struct rbx_axis {
+struct rbx_axes {
 	uint8_t x, y, z;
 };
 struct rbx_brickcolor {
@@ -99,6 +99,9 @@ struct rbx_token {
 struct rbx_referent {
 	int32_t data;
 };
+struct rbx_vector3int16 {
+	int16_t x, y, z;
+};
 struct rbx_object_ref {
 	void *data;
 };
@@ -114,7 +117,7 @@ struct rbx_value {
 		struct rbx_real real_value;
 		struct rbx_udim2 udim2_value;
 		struct rbx_faces faces_value;
-		struct rbx_axis axis_value;
+		struct rbx_axes axes_value;
 		struct rbx_brickcolor brickcolor_value;
 		struct rbx_color3 color3_value;
 		struct rbx_vector2 vector2_value;
@@ -123,6 +126,7 @@ struct rbx_value {
 		struct rbx_cframe cframe_value;
 		struct rbx_token token_value;
 		struct rbx_referent referent_value;
+		struct rbx_vector3int16 vector3int16_value;
 		struct rbx_object_ref object_value;
 	};
 };
