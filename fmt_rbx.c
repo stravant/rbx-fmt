@@ -47,6 +47,11 @@ uint32_t read_uint32(uint8_t **ptr) {
 	*ptr += 4;
 	return value;
 }
+int16_t read_int16_(uint8_t **ptr) {
+	int16_t value = *((int16_t*)(*ptr));
+	*ptr += 2;
+	return value;
+}
 uint8_t read_uint8(uint8_t **ptr) {
 	int8_t value = *((uint8_t*)(*ptr));
 	*ptr += 1;
@@ -258,6 +263,18 @@ int read_type_record(uint8_t **ptr, struct rbx_object_class *type_info) {
 	return 1;
 }
 
+void populate(float array[], float r00, float r01, float r02, float r10, float r11, float r12, float r20, float r21, float r22)  {
+	array[0] = r00;
+	array[1] = r01;
+	array[2] = r02;
+	array[3] = r10;
+	array[4] = r11;
+	array[5] = r12;
+	array[6] = r20;
+	array[7] = r21;
+	array[8] = r22;
+}
+
 /* Read in a values of a given property type */
 struct rbx_value **read_values(uint8_t type, uint8_t **ptr, size_t length, uint32_t value_count) {
 	uint8_t *after = (*ptr) + length;
@@ -378,15 +395,25 @@ struct rbx_value **read_values(uint8_t type, uint8_t **ptr, size_t length, uint3
 			value->udim2_value.y.offset = offsety;
 			*(output++) = value;
 		}
-	} else if (type == RBX_TYPE_RAY) {
-		// Ray value
-		// TODO:
 	} else if (type == RBX_TYPE_FACES) {
 		// Faces
-		// TODO:
-	} else if (type == RBX_TYPE_AXIS) {
+		struct rbx_value *value = malloc(sizeof(struct rbx_value));
+		value->type = RBX_TYPE_FACES;
+		value->faces_value.right = **ptr & 1;
+		value->faces_value.top = (**ptr >> 1) & 1;
+		value->faces_value.back = (**ptr >> 2) & 1;
+		value->faces_value.left = (**ptr >> 3) & 1;
+		value->faces_value.bottom = (**ptr >> 4) & 1;
+		value->faces_value.front = (**ptr >> 5) & 1;
+		*(output++) = value;
+	} else if (type == RBX_TYPE_AXES) {
 		// Axis
-		// TODO:
+		struct rbx_value *value = malloc(sizeof(struct rbx_value));
+		value->type = RBX_TYPE_AXES;
+		value->axes_value.x = **ptr & 1;
+		value->axes_value.y = (**ptr >> 1) & 1;
+		value->axes_value.z = (**ptr >> 2) & 1;
+		*(output++) = value;
 	} else if (type == RBX_TYPE_BRICKCOLOR) {
 		// BrickColor
 		unmix_32_array(*ptr, length);
@@ -483,8 +510,18 @@ struct rbx_value **read_values(uint8_t type, uint8_t **ptr, size_t length, uint3
 			*(output++) = value;	
 		}
 
-	} else if (type == 0xF) {
-		// ???
+	} else if (type == RBX_TYPE_RAY) {
+		for (int i = 0; i < value_count; ++i) {
+			struct rbx_value *value = malloc(sizeof(struct rbx_value));
+			value->type = RBX_TYPE_RAY;
+			value->ray_value.origin.x = read_float32(ptr);
+			value->ray_value.origin.y = read_float32(ptr);
+			value->ray_value.origin.z = read_float32(ptr);
+			value->ray_value.direction.x = read_float32(ptr);
+			value->ray_value.direction.y = read_float32(ptr);
+			value->ray_value.direction.z = read_float32(ptr);
+			*(output++) = value;
+		}
 	} else if (type == RBX_TYPE_CFRAME) {
 		// Cframe
 
@@ -499,31 +536,99 @@ struct rbx_value **read_values(uint8_t type, uint8_t **ptr, size_t length, uint3
 
 		// Loop over main data
 		for (int i = 0; i < value_count; ++i) {
-			uint8_t tag = read_uint8(ptr);
-
 			// Create value
 			struct rbx_value *value = malloc(sizeof(struct rbx_value));
 			value->type = RBX_TYPE_CFRAME;
 			*(output++) = value;				
 
-			// Rotation part
-			if (tag == 0x0) {
+			uint8_t tag = read_uint8(ptr);
+			
+			switch(tag) {
+			
+			case 0x0:
 				// Whole rotation matrix
 				for (int j = 0; j < 9; ++j) {
 					value->cframe_value.rotation[j] = read_float32(ptr);
 				}
-			} else if (tag == 0x1) {
-				assert(0); // Unknown tag
-			} else if (tag >= 0x2 && tag <= 0x23) {
-				// Read special combinations
-				// TODO: Implement
-				for (int j = 0; j < 9; ++j) {
-					value->cframe_value.rotation[j] = 0;
-				}
-			} else {
-				assert(0); // Unknown tag
+				break;
+			case 0x2:
+				populate(value->cframe_value.rotation,1,0,0,0,1,0,0,0,1);
+				break;
+			case 0x3:
+				populate(value->cframe_value.rotation,1,0,0,0,0,-1,0,1,0);
+				break;
+			case 0x5:
+				populate(value->cframe_value.rotation,1,0,0,0,-1,0,0,0,-1);
+				break;
+			case 0x6:
+				populate(value->cframe_value.rotation,1,0,-0,0,0,1,0,-1,0);
+				break;
+			case 0x7:
+				populate(value->cframe_value.rotation,0,1,0,1,0,0,0,0,-1);
+				break;
+			case 0x9:
+				populate(value->cframe_value.rotation,0,0,1,1,0,0,0,1,0);
+				break;
+			case 0xA:
+				populate(value->cframe_value.rotation,0,-1,0,1,0,-0,0,0,1);
+				break;
+			case 0xC:
+				populate(value->cframe_value.rotation,0,0,-1,1,0,0,0,-1,0);
+				break;
+			case 0xD:
+				populate(value->cframe_value.rotation,0,1,0,0,0,1,1,0,0);
+				break;
+			case 0xE:
+				populate(value->cframe_value.rotation,0,0,-1,0,1,0,1,0,0);
+				break;
+			case 0x10:
+				populate(value->cframe_value.rotation,0,-1,0,0,0,-1,1,0,0);
+				break;
+			case 0x11:
+				populate(value->cframe_value.rotation,0,0,1,0,-1,0,1,0,-0);
+				break;
+			case 0x14:
+				populate(value->cframe_value.rotation,-1,0,0,0,1,0,0,0,-1);
+				break;
+			case 0x15:
+				populate(value->cframe_value.rotation,-1,0,0,0,0,1,0,1,-0);
+				break;
+			case 0x17:
+				populate(value->cframe_value.rotation,-1,0,0,0,-1,0,0,0,1);
+				break;
+			case 0x18:
+				populate(value->cframe_value.rotation,-1,0,-0,0,0,-1,0,-1,-0);
+				break;
+			case 0x19:
+				populate(value->cframe_value.rotation,0,1,-0,-1,0,0,0,0,1);
+				break;
+			case 0x1B:
+				populate(value->cframe_value.rotation,0,0,-1,-1,0,0,0,1,0);
+				break;
+			case 0x1C:
+				populate(value->cframe_value.rotation,0,-1,-0,-1,0,-0,0,0,-1);
+				break;
+			case 0x1E:
+				populate(value->cframe_value.rotation,0,0,1,-1,0,0,0,-1,0);
+				break;
+			case 0x1F:
+				populate(value->cframe_value.rotation,0,1,0,0,0,-1,-1,0,0);
+				break;
+			case 0x20:
+				populate(value->cframe_value.rotation,0,0,1,0,1,-0,-1,0,0);
+				break;
+			case 0x22:
+				populate(value->cframe_value.rotation,0,-1,0,0,0,1,-1,0,0);
+				break;
+			case 0x23:
+				populate(value->cframe_value.rotation,0,0,-1,0,-1,-0,-1,0,-0);
+				break;
+			default:
+				printf("Invalid CFrame tag %x\n", tag);
+				assert(0);
+				break;
 			}
-
+			
 			// Position part
 			value->cframe_value.position.x = read_roblox_float(&x_ptr);
 			value->cframe_value.position.y = read_roblox_float(&y_ptr);
@@ -556,7 +661,7 @@ struct rbx_value **read_values(uint8_t type, uint8_t **ptr, size_t length, uint3
 				rvalue += diff;
 				my_value = rvalue;
 			} else {
-				my_value = 0;
+				my_value = -1;
 			}
 
 			// Create the value
@@ -565,6 +670,13 @@ struct rbx_value **read_values(uint8_t type, uint8_t **ptr, size_t length, uint3
 			value->referent_value.data = my_value;
 			*(output++) = value;	
 		}
+	} else if (type == RBX_TYPE_VECTOR3INT16) {
+		struct rbx_value *value = malloc(sizeof(struct rbx_value));
+		value->type = RBX_TYPE_VECTOR3INT16;
+		value->vector3int16_value.x = read_int16_(ptr);
+		value->vector3int16_value.y = read_int16_(ptr);
+		value->vector3int16_value.z = read_int16_(ptr);
+		*(output++) = value;
 	} else {
 		// ??
 	}
@@ -910,7 +1022,7 @@ struct rbx_file *read_rbx_file(void *data, size_t length) {
 			++object->prop_value_count;
 
 			// Find the parent
-			int32_t parent_referent;
+			int32_t parent_referent = -1;
 			for (int k = 0; k < objectcount; ++k) {
 				if (parents[k].object == referent) {
 					parent_referent = parents[k].parent;

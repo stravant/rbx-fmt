@@ -9,6 +9,7 @@
 
 #include "fmt_rbx.h"
 #include "terrain.h"
+#include "xml_writer.h"
 
 const char *get_name(struct rbx_object *object) {
 	for (int i = 0; i < object->prop_value_count; ++i) {
@@ -58,7 +59,6 @@ int main(int argc, char *argv[]) {
 	// Dump out the resulting data
 	if (file != NULL) {
 		printf("Success, details:\n");
-
 		// // Print out a dump of the info
 		// for (int i = 0; i < file->type_count; ++i) {
 		// 	struct rbx_object_class *type_info = (file->type_array + i);
@@ -126,6 +126,30 @@ int main(int argc, char *argv[]) {
 						prop_entry->value->udim2_value.y.scale,
 						prop_entry->value->udim2_value.y.offset);
 					break;
+				case RBX_TYPE_RAY:
+					printf("Ray{(%f, %f, %f}, (%f, %f, %f)}",
+						prop_entry->value->ray_value.origin.x,
+						prop_entry->value->ray_value.origin.y,
+						prop_entry->value->ray_value.origin.z,
+						prop_entry->value->ray_value.direction.x,
+						prop_entry->value->ray_value.direction.y,
+						prop_entry->value->ray_value.direction.z);
+					break;
+				case RBX_TYPE_FACES:
+					printf("Faces(%d, %d, %d, %d, %d, %d)",
+						prop_entry->value->faces_value.right,
+						prop_entry->value->faces_value.top,
+						prop_entry->value->faces_value.back,
+						prop_entry->value->faces_value.left,
+						prop_entry->value->faces_value.bottom,
+						prop_entry->value->faces_value.front);
+					break;
+				case RBX_TYPE_AXES:
+					printf("Axes(%d, %d, %d)",
+						prop_entry->value->axes_value.x,
+						prop_entry->value->axes_value.y,
+						prop_entry->value->axes_value.z);
+					break;
 				case RBX_TYPE_BRICKCOLOR:
 					printf("BrickColor(%u)", prop_entry->value->brickcolor_value.data);
 					break;
@@ -167,6 +191,12 @@ int main(int argc, char *argv[]) {
 				case RBX_TYPE_REFERENT:
 					printf("Referent(%d)", prop_entry->value->referent_value.data);
 					break;
+				case RBX_TYPE_VECTOR3INT16:
+					printf("Vector3int16(%d, %d, %d)",
+						prop_entry->value->vector3int16_value.x,
+						prop_entry->value->vector3int16_value.y,
+						prop_entry->value->vector3int16_value.z);
+					break;
 				case RBX_TYPE_OBJECT:
 					fflush(stdout);
 					if (prop_entry->value->object_value.data == NULL) {
@@ -185,10 +215,11 @@ int main(int argc, char *argv[]) {
 			}
 			printf(" '------\n\n");
 		}
-
+		
+		write_rbx_file(file);
 		// Is there cluster grid data?
 		if (cluster_grid != NULL) {
-			printf("Cluster grid data: %lu\n", cluster_grid->length);
+			printf("Cluster grid data: %u\n", cluster_grid->length);
 			struct rbx_terrain *data = translate_terrain(cluster_grid);
 			if (data) {
 				printf("Translated terrain, result:\n");
